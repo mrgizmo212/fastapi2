@@ -8,17 +8,6 @@ import datetime
 API_KEY = '0cv62bvSH9Xe_qHUVgkq4AE1ha9n7E7S'
 BASE_URL = 'https://api.polygon.io'
 
-
-# Add CORS middleware
-origins = [
-    "http://localhost",
-    "http://localhost:8004",
-    "http://localhost:3000",
-    "http://127.0.0.1:8000",
-    "http://127.0.0.1:3000",
-    "*"
-]
-
 class TickerRequest(BaseModel):
     ticker: str
     expiration_date: Optional[str] = None
