@@ -5,6 +5,16 @@ from typing import Optional
 import requests
 import datetime
 
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 API_KEY = '0cv62bvSH9Xe_qHUVgkq4AE1ha9n7E7S'
 BASE_URL = 'https://api.polygon.io'
 
@@ -55,8 +65,8 @@ def sort_by_volume(options):
 def get_top_two_options(itm_options):
     return itm_options[:2]
 
-
-def post(request: TickerRequest):
+@app.post("/options")
+async def get_options(request: TickerRequest):
     ticker = request.ticker.upper()
     expiration_date = request.expiration_date
 
@@ -69,7 +79,6 @@ def post(request: TickerRequest):
             if not options_chain:
                 raise HTTPException(status_code=404, detail="No options contracts found for the given expiration date.")
         else:
-            # Sort by expiration date and select the closest one
             options_chain = sorted(options_chain, key=lambda x: x['details']['expiration_date'])
             if options_chain:
                 closest_expiration_date = options_chain[0]['details']['expiration_date']
@@ -104,3 +113,6 @@ def post(request: TickerRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
