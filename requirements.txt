@@ -37,3 +37,4 @@ selenium
 numpy
 typing
 lightweight-charts
+asyncio
