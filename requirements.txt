@@ -35,3 +35,4 @@ mplfinance
 pandas
 selenium
 numpy
+typing
