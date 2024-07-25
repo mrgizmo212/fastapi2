@@ -3,17 +3,15 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import requests
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import time
 import base64
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
+import io
+import matplotlib.pyplot as plt
+import mplfinance as mpf
+import pandas as pd
 
 # Load environment variables
 load_dotenv()
@@ -39,29 +37,28 @@ def get_stock_data(ticker, multiplier, timespan, from_date, to_date):
     response = requests.get(url)
     return response.json()
 
-# Function to create TradingView chart image
-def create_tradingview_chart_image(ticker):
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--window-size=1920,1080")
+# Function to create chart image
+def create_chart_image(data):
+    # Convert data to pandas DataFrame
+    df = pd.DataFrame(data['results'])
+    df['t'] = pd.to_datetime(df['t'], unit='ms')
+    df.set_index('t', inplace=True)
+    df.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'n', 'vw']
 
-    driver = webdriver.Chrome(options=options)
+    # Create the candlestick chart
+    fig, ax = plt.subplots(figsize=(10, 6))
+    mpf.plot(df, type='candle', style='charles', ax=ax)
     
-    url = f"https://www.tradingview.com/chart/?symbol={ticker}"
-    driver.get(url)
-
-    # Wait for the chart to load
-    wait = WebDriverWait(driver, 20)
-    chart = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "chart-markup-table")))
+    # Save the figure to a bytes buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
     
-    # Give extra time for the chart to render completely
-    time.sleep(5)
-
-    # Take screenshot
-    chart_image = driver.get_screenshot_as_base64()
+    # Convert the buffer to base64
+    chart_image = base64.b64encode(buf.getvalue()).decode('utf-8')
     
-    driver.quit()
-
+    plt.close(fig)
+    
     return chart_image
 
 # Function to keep connection alive
@@ -70,7 +67,7 @@ async def keep_alive():
 
 @app.post("/analyze_stock")
 async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks):
-    ticker = request.ticker.upper()
+    ticker = request.ticker.upper()  # Convert ticker to uppercase
     multiplier = request.multiplier
     timespan = request.timespan
     from_date = request.from_date
@@ -82,8 +79,8 @@ async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks
     if 'results' not in stock_data or not stock_data['results']:
         raise HTTPException(status_code=404, detail=f"No data available for {ticker} from {from_date} to {to_date}. Please check your date range and ensure it's not in the future.")
 
-    # Create TradingView chart image
-    chart_image_base64 = create_tradingview_chart_image(ticker)
+    # Create chart image
+    chart_image_base64 = create_chart_image(stock_data)
 
     # Prepare prompt for GPT-4o
     prompt = f"""
@@ -91,7 +88,7 @@ async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks
     
     {stock_data}
     
-    A TradingView chart image of this stock has been generated. Please provide insights on the stock's performance, 
+    A chart image of this stock has been generated. Please provide insights on the stock's performance, 
     trends, and any notable events or patterns you can discern from the data.
     """
 
