@@ -83,13 +83,20 @@ async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks
     chart_image_base64 = create_chart_image(stock_data)
 
     # Prepare prompt for GPT-4o
+    analysis_header = f"TTG AI - MARI Stock Chart Analysis for: {ticker} on a {multiplier} {timespan} chart from {from_date} to {to_date}\n\n"
+    
+    # Include aggregate bar data in the prompt
+    aggregate_data = "\n".join([f"Date: {datetime.fromtimestamp(bar['t']/1000).strftime('%Y-%m-%d')}, Open: {bar['o']}, High: {bar['h']}, Low: {bar['l']}, Close: {bar['c']}, Volume: {bar['v']}" for bar in stock_data['results']])
+    
     prompt = f"""
+    {analysis_header}
     Analyze the following stock data for {ticker} from {from_date} to {to_date}:
     
-    {stock_data}
+    Aggregate Bar Data:
+    {aggregate_data}
     
     A chart image of this stock has been generated. Please provide insights on the stock's performance, 
-    trends, and any notable events or patterns you can discern from the data.
+    trends, and any notable events or patterns you can discern from the data. Start your analysis with the header provided above.
     """
 
     # Get GPT-4o interpretation
@@ -102,11 +109,12 @@ async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks
             ]
         )
 
-        analysis = response.choices[0].message.content
+        analysis = analysis_header + response.choices[0].message.content
 
         # Add keep-alive task
         background_tasks.add_task(keep_alive)
 
+        # Return only the chart image and analysis to the user
         return {
             "chart_image": chart_image_base64,
             "analysis": analysis
