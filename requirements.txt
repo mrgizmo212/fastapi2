@@ -38,3 +38,4 @@ numpy
 typing
 lightweight-charts
 asyncio
+uuid
