@@ -3,12 +3,11 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import requests
 from datetime import datetime
-import base64
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
-import io
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pandas as pd
@@ -21,6 +20,13 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # Initialize FastAPI app
 app = FastAPI()
+
+# Ensure the charts directory exists
+charts_dir = os.path.join(os.path.dirname(__file__), "charts")
+os.makedirs(charts_dir, exist_ok=True)
+
+# Mount static files directory for serving chart images
+app.mount("/charts", StaticFiles(directory=charts_dir), name="charts")
 
 # Pydantic model for request body
 class StockRequest(BaseModel):
@@ -38,7 +44,7 @@ def get_stock_data(ticker, multiplier, timespan, from_date, to_date):
     return response.json()
 
 # Function to create chart image
-def create_chart_image(data):
+def create_chart_image(data, ticker):
     # Convert data to pandas DataFrame
     df = pd.DataFrame(data['results'])
     df['t'] = pd.to_datetime(df['t'], unit='ms')
@@ -49,17 +55,13 @@ def create_chart_image(data):
     fig, ax = plt.subplots(figsize=(10, 6))
     mpf.plot(df, type='candle', style='charles', ax=ax)
     
-    # Save the figure to a bytes buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
-    
-    # Convert the buffer to base64
-    chart_image = base64.b64encode(buf.getvalue()).decode('utf-8')
-    
+    # Save the figure to a file
+    filename = f"{ticker}_chart.png"
+    filepath = os.path.join(charts_dir, filename)
+    plt.savefig(filepath)
     plt.close(fig)
     
-    return chart_image
+    return filename
 
 # Function to keep connection alive
 async def keep_alive():
@@ -80,7 +82,7 @@ async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks
         raise HTTPException(status_code=404, detail=f"No data available for {ticker} from {from_date} to {to_date}. Please check your date range and ensure it's not in the future.")
 
     # Create chart image
-    chart_image_base64 = create_chart_image(stock_data)
+    chart_filename = create_chart_image(stock_data, ticker)
 
     # Prepare prompt for GPT-4o
     analysis_header = f"TTG AI - MARI Stock Chart Analysis for: {ticker} on a {multiplier} {timespan} chart from {from_date} to {to_date}\n\n"
@@ -114,9 +116,9 @@ async def analyze_stock(request: StockRequest, background_tasks: BackgroundTasks
         # Add keep-alive task
         background_tasks.add_task(keep_alive)
 
-        # Return only the chart image and analysis to the user
+        # Return the chart image path and analysis to the user
         return {
-            "chart_image": chart_image_base64,
+            "chart_image": f"/charts/{chart_filename}",
             "analysis": analysis
         }
     except Exception as e:
