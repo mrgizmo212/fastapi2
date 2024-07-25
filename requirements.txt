@@ -36,3 +36,4 @@ pandas
 selenium
 numpy
 typing
+lightweight-charts
