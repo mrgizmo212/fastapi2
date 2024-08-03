@@ -1,13 +1,20 @@
 import os
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from pydantic import BaseModel, field_validator
-from gpt_researcher import GPTResearcher
-import asyncio
-import uvicorn
-import argparse
+import sys
+import requests
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+from openai import OpenAI
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, field_validator
+import uvicorn
+
+from gpt_researcher import GPTResearcher
+import asyncio
+import argparse
+
 
 # Load environment variables
 load_dotenv()
@@ -84,7 +91,7 @@ async def research(query: Query):
 
 def run_fastapi():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0", help="Host to run the server on")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to run the server on")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the server on")
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
