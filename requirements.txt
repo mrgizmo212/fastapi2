@@ -35,3 +35,4 @@ uvicorn
 gpt-researcher
 nest-asyncio
 asyncio
+argparse
