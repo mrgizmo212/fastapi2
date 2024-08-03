@@ -25,7 +25,7 @@ langchain-openai>=0.1,<0.2
 langchain-google-genai>=1,<2
 langchain-groq>=0.1,<0.2
 langchain_anthropic>=0.1,<0.2
-langchain_mistralai>=0.1,<0.2
+langchain-mistralai==0.1.12
 langchain_huggingface>=0.0.1,<0.1
 langchain_together>=0.1,<0.2
 langchain_cohere
@@ -51,6 +51,7 @@ unstructured
 pandas
 json_repair
 exa_py
+httpx<0.25.0,>=0.23.0
 
 # Additional dependencies from multi_agents/requirements.txt
 langgraph-cli
