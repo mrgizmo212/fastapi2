@@ -5,60 +5,34 @@ pre-commit >=2.17.0,<4.0.0
 # For generating screenshots
 playwright
 
-# dependencies
-beautifulsoup4
+annotated-types
+anyio
+certifi
+charset-normalizer
 colorama
-duckduckgo_search
-md2pdf
-playwright
+DateTime
+distro
+h11
+httpcore
+httpx
+idna
 openai
-python-dotenv
-pyyaml
-uvicorn
 pydantic
-fastapi
-python-multipart
-markdown
-langchain>=0.2,<0.3
-langchain_community>=0.2,<0.3
-langchain-openai>=0.1,<0.2
-langchain-google-genai>=1,<2
-langchain-groq>=0.1,<0.2
-langchain_anthropic>=0.1,<0.2
-langchain-mistralai==0.1.12
-langchain_huggingface>=0.0.1,<0.1
-langchain_together>=0.1,<0.2
-langchain_cohere
-langchain_google_vertexai
-langchain_fireworks
-langchain_aws
-tiktoken
-tavily-python
-gpt-researcher
-arxiv
-PyMuPDF
+pydantic_core
+python-dotenv
+pytz
 requests
-jinja2
-aiofiles
-newspaper3k
-SQLAlchemy
-mistune
-python-docx
-htmldocx
-lxml[html_clean]
-websockets
-unstructured
-pandas
-json_repair
-exa_py
-httpx<0.25.0,>=0.23.0
-
-# Additional dependencies from multi_agents/requirements.txt
-langgraph-cli
-langgraph
-weasyprint
-json5
-
-# uncomment for testing
-# pytest
-# pytest-asyncio
+sniffio
+timedelta
+tqdm
+typing_extensions
+urllib3
+websocket-client
+zope.interface
+lightweight-charts
+fastapi
+uvicorn
+gpt-researcher
+nest-asyncio
+asyncio
+argparse
