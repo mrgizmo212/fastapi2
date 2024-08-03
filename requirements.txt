@@ -30,3 +30,8 @@ urllib3
 websocket-client
 zope.interface
 lightweight-charts
+fastapi
+uvicorn
+gpt-researcher
+nest-asyncio
+asyncio
