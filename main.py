@@ -2,6 +2,7 @@ import os
 import sys
 import requests
 import json
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,7 +16,6 @@ from gpt_researcher import GPTResearcher
 import asyncio
 import argparse
 
-
 # Load environment variables
 load_dotenv()
 
@@ -26,12 +26,12 @@ class Query(BaseModel):
     query: str
     report_type: str = "research_report"
     date: datetime | None = None
+    sources: list[str] = []
 
     @field_validator('date', mode='before')
     def parse_date(cls, value):
         if isinstance(value, str):
             try:
-                # Parse the string as UTC, then convert to Eastern Time
                 utc_time = datetime.fromisoformat(value.rstrip('Z')).replace(tzinfo=ZoneInfo("UTC"))
                 et_time = utc_time.astimezone(ZoneInfo("America/New_York"))
                 print(f"Original UTC time: {utc_time}, Converted ET time: {et_time}")
@@ -65,7 +65,9 @@ def get_referenced_date(query: str, current_date: datetime) -> datetime:
    
     return current_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
-async def get_report(query: str, report_type: str, query_date: datetime = None) -> str:
+async def get_report(query: str, report_type: str, sources: list, query_date: datetime = None) -> tuple:
+    start_time = time.time()
+    
     if query_date:
         current_date = query_date
     else:
@@ -78,16 +80,30 @@ async def get_report(query: str, report_type: str, query_date: datetime = None) 
         date_context += f"regarding {referenced_date.strftime('%A, %B %d, %Y')}, "
     contextualized_query = date_context + query
 
-    researcher = GPTResearcher(contextualized_query, report_type)
-    research_result = await researcher.conduct_research()
+    researcher = GPTResearcher(query=contextualized_query, report_type=report_type, source_urls=sources)
+    await researcher.conduct_research()
     report = await researcher.write_report()
-    return report
+    
+    end_time = time.time()
+    execution_time = end_time - start_time
+    
+    return report, execution_time
 
 @app.post("/research")
 async def research(query: Query):
     print(f"Received query: {query}")
-    report = await get_report(query.query, query.report_type, query.date)
-    return {"report": report, "date": query.date}
+    report, execution_time = await get_report(query.query, query.report_type, query.sources, query.date)
+    return {"report": report, "date": query.date, "execution_time": execution_time}
+
+@app.post("/research_direct")
+async def research_direct(query: str, report_type: str = "research_report", sources: list = []):
+    start_time = time.time()
+    researcher = GPTResearcher(query=query, report_type=report_type, source_urls=sources)
+    await researcher.conduct_research()
+    report = await researcher.write_report()
+    end_time = time.time()
+    execution_time = end_time - start_time
+    return {"report": report, "execution_time": execution_time}
 
 def run_fastapi():
     parser = argparse.ArgumentParser()
@@ -102,9 +118,11 @@ def run_terminal():
     parser.add_argument("--report_type", type=str, default="research_report", help="Type of report")
     parser.add_argument("--date", type=lambda d: datetime.fromisoformat(d).replace(tzinfo=ZoneInfo("America/New_York")),
                         help="Query date (YYYY-MM-DD HH:MM:SS in America/New_York)")
+    parser.add_argument("--sources", nargs='+', default=[], help="List of source URLs")
     args = parser.parse_args()
-    report = asyncio.run(get_report(args.query, args.report_type, args.date))
-    print(report)
+    report, execution_time = asyncio.run(get_report(args.query, args.report_type, args.sources, args.date))
+    print(f"Report:\n{report}")
+    print(f"Execution time: {execution_time:.2f} seconds")
 
 if __name__ == "__main__":
     import sys
