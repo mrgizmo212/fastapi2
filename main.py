@@ -10,6 +10,7 @@ import requests
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from plotly.subplots import make_subplots
@@ -218,16 +219,28 @@ async def api_analyze_stock(stock_request: StockRequest, request: Request):
     # Construct the full URL to the chart
     chart_url = f"{base_url}charts/{chart_filename}"
     
-    # Create the HTML for the summary and link
-    html_output = f"""
-    <div style="background-color: #1e1e1e; color: #e1e1e1; padding: 20px; font-family: Arial, sans-serif;">
-        <h2>Summary:</h2>
+    # Create the HTML response with embedded JavaScript to open the chart
+    html_content = f"""
+    <html>
+    <head>
+        <title>Stock Analysis Result</title>
+        <script>
+            function openChartWindow() {{
+                window.open('{chart_url}', 'ChartWindow', 'width=1200,height=800');
+            }}
+            // Automatically open the chart when the page loads
+            window.onload = openChartWindow;
+        </script>
+    </head>
+    <body style="background-color: #1e1e1e; color: #e1e1e1; font-family: Arial, sans-serif; padding: 20px;">
+        <h2>Analysis Summary:</h2>
         <p>{analysis}</p>
-        <a href="{chart_url}" target="_blank" style="color: #00FFFF;">View the Chart</a>
-    </div>
+        <button onclick="openChartWindow()" style="background-color: #00FFFF; color: #000000; border: none; padding: 10px 20px; cursor: pointer;">View Chart Again</button>
+    </body>
+    </html>
     """
     
-    return {"html_output": html_output, "chart_url": chart_url}
+    return HTMLResponse(content=html_content, status_code=200)
 
 async def cli_analyze_stock():
     print("Welcome to the Stock Analyzer!")
