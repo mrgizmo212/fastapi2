@@ -17,7 +17,7 @@ from openai import OpenAI
 from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field
 
-# Set up logging
+# Set up loggings
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load environment variables
