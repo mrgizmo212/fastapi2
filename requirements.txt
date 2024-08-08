@@ -39,3 +39,5 @@ typing
 lightweight-charts
 asyncio
 uuid
+plotly
+kaleido
