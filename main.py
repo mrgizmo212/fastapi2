@@ -9,7 +9,7 @@ import plotly.io as pio
 import requests
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from plotly.subplots import make_subplots
@@ -209,12 +209,25 @@ async def analyze_stock(stock_request: StockRequest):
         raise HTTPException(status_code=500, detail=f"An error occurred while getting AI analysis: {str(e)}")
 
 @app.post("/analyze_stock")
-async def api_analyze_stock(stock_request: StockRequest):
+async def api_analyze_stock(stock_request: StockRequest, request: Request):
     analysis, chart_filename = await analyze_stock(stock_request)
-    return {
-        "analysis": analysis,
-        "chart_url": f"/charts/{chart_filename}"
-    }
+    
+    # Get the base URL of the current request
+    base_url = str(request.base_url)
+    
+    # Construct the full URL to the chart
+    chart_url = f"{base_url}charts/{chart_filename}"
+    
+    # Create the HTML for the summary and link
+    html_output = f"""
+    <div style="background-color: #1e1e1e; color: #e1e1e1; padding: 20px; font-family: Arial, sans-serif;">
+        <h2>Summary:</h2>
+        <p>{analysis}</p>
+        <a href="{chart_url}" target="_blank" style="color: #00FFFF;">View the Chart</a>
+    </div>
+    """
+    
+    return {"html_output": html_output, "chart_url": chart_url}
 
 async def cli_analyze_stock():
     print("Welcome to the Stock Analyzer!")
