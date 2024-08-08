@@ -2,7 +2,8 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, time
+import pytz
 
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -149,6 +150,12 @@ def create_candlestick_chart(stock_data, ticker):
         logging.error(f"Error in create_candlestick_chart: {str(e)}")
         raise
 
+def is_market_open():
+    ny_time = datetime.now(pytz.timezone('America/New_York'))
+    market_open = time(9, 30)
+    market_close = time(16, 0)
+    return market_open <= ny_time.time() <= market_close and ny_time.weekday() < 5
+
 async def analyze_stock(stock_request: StockRequest):
     logging.info(f"Analyzing stock: {stock_request.ticker}")
     ticker = stock_request.ticker.upper()
@@ -172,8 +179,14 @@ async def analyze_stock(stock_request: StockRequest):
         logging.error(f"Failed to create candlestick chart: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create candlestick chart: {str(e)}")
 
+    # Get current time in New York
+    ny_time = datetime.now(pytz.timezone('America/New_York'))
+    current_time = ny_time.strftime("%Y-%m-%d %I:%M %p ET")
+    market_status = "open" if is_market_open() else "closed"
+
     # Prepare prompt for GPT-4o
-    analysis_header = f"TTG AI - MARI Stock Chart Analysis for: {ticker} on a {multiplier} {timespan} chart from {from_date} to {to_date}\n\n"
+    analysis_header = f"TTG AI - MARI Stock Chart Analysis for: {ticker} on a {multiplier} {timespan} chart from {from_date} to {to_date}\n"
+    analysis_header += f"Current Time: {current_time}, Market is currently {market_status}\n\n"
 
     # Include aggregate bar data in the prompt
     aggregate_data = "\n".join([f"Date: {datetime.fromtimestamp(bar['t']/1000).strftime('%Y-%m-%d %H:%M')}, Open: {bar['o']}, High: {bar['h']}, Low: {bar['l']}, Close: {bar['c']}, Volume: {bar['v']}" for bar in stock_data['results']])
@@ -187,6 +200,9 @@ async def analyze_stock(stock_request: StockRequest):
 
     A candlestick chart of this stock has been generated. Please provide insights on the stock's performance,
     trends, and any notable events or patterns you can discern from the data. Start your analysis with the header provided above.
+    
+    Important: The current time is {current_time} and the market is {market_status}. Please adjust your analysis accordingly,
+    avoiding phrases like "end of day" if the market is still open, and considering the current market status in your analysis.
     """
 
     # Get GPT-4o interpretation
