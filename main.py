@@ -5,7 +5,7 @@ import requests
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import asyncio
 from selenium import webdriver
@@ -33,11 +33,15 @@ app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 # Pydantic model for request body
 class StockRequest(BaseModel):
-    ticker: str
-    multiplier: str
-    timespan: str
+    ticker: str = Field(..., to_lower=True)
+    multiplier: str = Field(..., to_lower=True)
+    timespan: str = Field(..., to_lower=True)
     from_date: str
     to_date: str
+
+    class Config:
+        alias_generator = lambda string: string.lower()
+        allow_population_by_field_name = True
 
 # Function to get stock data from Polygon API
 def get_stock_data(ticker, multiplier, timespan, from_date, to_date):
@@ -64,7 +68,7 @@ def capture_tradingview_chart(ticker, timespan, from_date, to_date):
             "day": "D",
             "week": "W",
             "month": "M"
-        }.get(timespan, "D")
+        }.get(timespan.lower(), "D")
 
         url = f"https://www.tradingview.com/chart/?symbol={ticker}&interval={tv_timespan}&range={from_date}/{to_date}"
         driver.get(url)
