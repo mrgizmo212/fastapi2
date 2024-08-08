@@ -10,8 +10,8 @@ import plotly.io as pio
 import requests
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Query
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from plotly.subplots import make_subplots
@@ -269,11 +269,7 @@ async def analyze_stock(stock_request: StockRequest):
         raise HTTPException(status_code=500, detail=f"An error occurred while getting AI analysis: {str(e)}")
 
 @app.post("/analyze_stock")
-async def api_analyze_stock(
-    stock_request: StockRequest, 
-    request: Request,
-    response_type: str = Query("json", description="Response type: 'json' or 'html'")
-):
+async def api_analyze_stock(stock_request: StockRequest, request: Request):
     analysis, chart_filename = await analyze_stock(stock_request)
     
     # Get the base URL of the current request
@@ -282,35 +278,28 @@ async def api_analyze_stock(
     # Construct the full URL to the chart
     chart_url = f"{base_url}charts/{chart_filename}"
     
-    if response_type.lower() == "html":
-        # Create the HTML response
-        html_content = f"""
-        <html>
-        <head>
-            <title>Stock Analysis Result</title>
-            <script>
-                function openChartWindow() {{
-                    window.open('{chart_url}', 'ChartWindow', 'width=1200,height=800');
-                }}
-                // Automatically open the chart when the page loads
-                window.onload = openChartWindow;
-            </script>
-        </head>
-        <body style="background-color: #1e1e1e; color: #e1e1e1; font-family: Arial, sans-serif; padding: 20px;">
-            <h2>Analysis Summary:</h2>
-            <p>{analysis}</p>
-            <button onclick="openChartWindow()" style="background-color: #00FFFF; color: #000000; border: none; padding: 10px 20px; cursor: pointer;">View Chart Again</button>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html_content, status_code=200)
-    else:
-        # Prepare the JSON response
-        response_data = {
-            "analysis": analysis,
-            "chart_url": chart_url
-        }
-        return JSONResponse(content=response_data)
+    # Create the HTML response with embedded JavaScript to open the chart
+    html_content = f"""
+    <html>
+    <head>
+        <title>Stock Analysis Result</title>
+        <script>
+            function openChartWindow() {{
+                window.open('{chart_url}', 'ChartWindow', 'width=1200,height=800');
+            }}
+            // Automatically open the chart when the page loads
+            window.onload = openChartWindow;
+        </script>
+    </head>
+    <body style="background-color: #1e1e1e; color: #e1e1e1; font-family: Arial, sans-serif; padding: 20px;">
+        <h2>Analysis Summary:</h2>
+        <p>{analysis}</p>
+        <button onclick="openChartWindow()" style="background-color: #00FFFF; color: #000000; border: none; padding: 10px 20px; cursor: pointer;">View Chart Again</button>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content, status_code=200)
 
 async def cli_analyze_stock():
     print("Welcome to the Stock Analyzer!")
