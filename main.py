@@ -6,7 +6,7 @@ from datetime import datetime, date, time, timedelta
 
 import pandas as pd
 import pytz
-import requests
+import aiohttp
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -70,91 +70,94 @@ def validate_dates(from_date: str, to_date: str, current_date: date) -> tuple:
 
     return from_date, to_date
 
+async def fetch_daily_data(session, url, current_date, include_extended_hours):
+    async with session.get(url) as response:
+        data = await response.json()
+        if response.status == 200 and data.get('status') == 'OK':
+            result = {
+                't': int(datetime.strptime(data['from'], "%Y-%m-%d").timestamp() * 1000),
+                'o': data['open'],
+                'h': data['high'],
+                'l': data['low'],
+                'c': data['close'],
+                'v': data['volume'],
+            }
+            if include_extended_hours:
+                result['preMarket'] = data.get('preMarket')
+                result['afterHours'] = data.get('afterHours')
+            logging.info(f"Received data for {current_date}")
+            return result
+        elif response.status != 404:
+            logging.error(f"API request failed with status code {response.status}")
+            logging.error(f"Response content: {data}")
+        else:
+            logging.info(f"No data available for {current_date} (likely a weekend or holiday)")
+        return None
+
+async def fetch_current_day_data(session, url, current_date, include_extended_hours):
+    async with session.get(url) as response:
+        data = await response.json()
+        if response.status == 200 and data.get('results'):
+            minute_data = data['results']
+            ny_tz = pytz.timezone('America/New_York')
+            market_open = time(9, 30)
+            market_close = time(16, 0)
+
+            if include_extended_hours:
+                filtered_data = minute_data
+            else:
+                filtered_data = [bar for bar in minute_data if market_open <= datetime.fromtimestamp(bar['t']/1000, tz=ny_tz).time() <= market_close]
+
+            if filtered_data:
+                result = {
+                    't': filtered_data[-1]['t'],
+                    'o': filtered_data[0]['o'],
+                    'h': max(bar['h'] for bar in filtered_data),
+                    'l': min(bar['l'] for bar in filtered_data),
+                    'c': filtered_data[-1]['c'],
+                    'v': sum(bar['v'] for bar in filtered_data)
+                }
+                logging.info(f"Received and processed current day data for {current_date}")
+                return result
+            else:
+                logging.info(f"No data available within specified hours for {current_date}")
+        else:
+            logging.error(f"Failed to fetch current day data: {data}")
+        return None
+
 async def get_stock_data(ticker, multiplier, timespan, from_date, to_date, include_extended_hours):
     logging.info(f"Fetching stock data for {ticker} from {from_date} to {to_date}")
     api_key = os.getenv('POLYGON_API_KEY')
     
-    all_results = []
-    
-    if timespan.lower() == 'day':
-        base_url = "https://api.polygon.io/v1/open-close"
-        current_date = from_date
-        today = date.today()
-        
-        while current_date <= to_date:
-            if current_date < today:
-                url = f"{base_url}/{ticker}/{current_date}?adjusted=true&apiKey={api_key}"
-                logging.info(f"Requesting historical data from {url}")
-                response = requests.get(url)
-                data = response.json()
-
-                if response.status_code == 200 and data.get('status') == 'OK':
-                    result = {
-                        't': int(datetime.strptime(data['from'], "%Y-%m-%d").timestamp() * 1000),
-                        'o': data['open'],
-                        'h': data['high'],
-                        'l': data['low'],
-                        'c': data['close'],
-                        'v': data['volume'],
-                    }
-                    if include_extended_hours:
-                        result['preMarket'] = data.get('preMarket')
-                        result['afterHours'] = data.get('afterHours')
-                    all_results.append(result)
-                    logging.info(f"Received data for {current_date}")
-                elif response.status_code != 404:
-                    logging.error(f"API request failed with status code {response.status_code}")
+    async with aiohttp.ClientSession() as session:
+        if timespan.lower() == 'day':
+            base_url = "https://api.polygon.io/v1/open-close"
+            current_date = from_date
+            today = date.today()
+            
+            tasks = []
+            while current_date <= to_date:
+                if current_date < today:
+                    url = f"{base_url}/{ticker}/{current_date}?adjusted=true&apiKey={api_key}"
+                    tasks.append(fetch_daily_data(session, url, current_date, include_extended_hours))
+                elif current_date == today:
+                    url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/{current_date}/{current_date}?adjusted=true&sort=asc&limit=1440&apiKey={api_key}"
+                    tasks.append(fetch_current_day_data(session, url, current_date, include_extended_hours))
+                current_date += timedelta(days=1)
+            
+            all_results = await asyncio.gather(*tasks)
+            all_results = [result for result in all_results if result is not None]
+        else:
+            base_url = "https://api.polygon.io/v2/aggs/ticker"
+            url = f"{base_url}/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}?adjusted=true&sort=asc&limit=50000&apiKey={api_key}"
+            async with session.get(url) as response:
+                if response.status != 200:
+                    data = await response.json()
+                    logging.error(f"API request failed with status code {response.status}")
                     logging.error(f"Response content: {data}")
-                else:
-                    logging.info(f"No data available for {current_date} (likely a weekend or holiday)")
-            elif current_date == today:
-                url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/{current_date}/{current_date}?adjusted=true&sort=asc&limit=1440&apiKey={api_key}"
-                logging.info(f"Requesting current day data from {url}")
-                response = requests.get(url)
-                data = response.json()
-
-                if response.status_code == 200 and data.get('results'):
-                    minute_data = data['results']
-                    ny_tz = pytz.timezone('America/New_York')
-                    current_time = datetime.now(ny_tz).time()
-                    market_open = time(9, 30)
-                    market_close = time(16, 0)
-
-                    if include_extended_hours:
-                        filtered_data = minute_data
-                    else:
-                        filtered_data = [bar for bar in minute_data if market_open <= datetime.fromtimestamp(bar['t']/1000, tz=ny_tz).time() <= market_close]
-
-                    if filtered_data:
-                        result = {
-                            't': filtered_data[-1]['t'],
-                            'o': filtered_data[0]['o'],
-                            'h': max(bar['h'] for bar in filtered_data),
-                            'l': min(bar['l'] for bar in filtered_data),
-                            'c': filtered_data[-1]['c'],
-                            'v': sum(bar['v'] for bar in filtered_data)
-                        }
-                        all_results.append(result)
-                        logging.info(f"Received and processed current day data for {current_date}")
-                    else:
-                        logging.info(f"No data available within specified hours for {current_date}")
-                else:
-                    logging.error(f"Failed to fetch current day data: {data}")
-
-            current_date += timedelta(days=1)
-    else:
-        base_url = "https://api.polygon.io/v2/aggs/ticker"
-        url = f"{base_url}/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}?adjusted=true&sort=asc&limit=50000&apiKey={api_key}"
-        logging.info(f"Requesting data from {url}")
-        response = requests.get(url)
-        data = response.json()
-
-        if response.status_code != 200:
-            logging.error(f"API request failed with status code {response.status_code}")
-            logging.error(f"Response content: {data}")
-            raise HTTPException(status_code=response.status_code, detail=f"API request failed: {data.get('error', 'Unknown error')}")
-
-        all_results = data.get('results', [])
+                    raise HTTPException(status_code=response.status, detail=f"API request failed: {data.get('error', 'Unknown error')}")
+                data = await response.json()
+                all_results = data.get('results', [])
 
     logging.info(f"Total data points fetched: {len(all_results)}")
 
