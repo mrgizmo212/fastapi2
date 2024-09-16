@@ -2,31 +2,13 @@
 -r requirements-tests.txt
 -r requirements-docs.txt
 pre-commit >=2.17.0,<4.0.0
-# For generating screenshots
-playwright
-
-annotated-types
-anyio
-certifi
-charset-normalizer
-colorama
-DateTime
-distro
-h11
-httpcore
-httpx
-idna
-openai
-pydantic
-pydantic_core
-python-dotenv
-pytz
+fastapi
+uvicorn
 requests
-sniffio
-timedelta
-tqdm
-typing_extensions
-urllib3
-websocket-client
-zope.interface
-lightweight-charts
+pydantic
+python-dotenv
+asyncio
+typing
+logging
+datetime
+pytz
