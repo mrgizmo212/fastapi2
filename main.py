@@ -2,7 +2,8 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime, date, time, timedelta
+import time
+from datetime import datetime, date, time as dt_time, timedelta
 
 import pandas as pd
 import pytz
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from openai import OpenAI
 from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 sys.path.append(os.path.abspath("./PatternPy"))
 from PatternPy.tradingpatterns.tradingpatterns import (
@@ -50,6 +52,28 @@ class StockRequest(BaseModel):
     to_date: str = Field(..., description="End date in YYYY-MM-DD format")
     include_extended_hours: bool = Field(..., description="Include pre and post market data")
 
+class RateLimiter:
+    def __init__(self, rate_limit):
+        self.rate_limit = rate_limit
+        self.tokens = rate_limit
+        self.updated_at = time.monotonic()
+
+    async def acquire(self):
+        while self.tokens < 1:
+            self.add_new_tokens()
+            await asyncio.sleep(0.1)
+        self.tokens -= 1
+
+    def add_new_tokens(self):
+        now = time.monotonic()
+        time_since_update = now - self.updated_at
+        new_tokens = time_since_update * self.rate_limit
+        if new_tokens > 1:
+            self.tokens = min(self.tokens + new_tokens, self.rate_limit)
+            self.updated_at = now
+
+rate_limiter = RateLimiter(5)  # 5 requests per second
+
 def validate_dates(from_date: str, to_date: str, current_date: date) -> tuple:
     try:
         from_date = datetime.strptime(from_date, "%Y-%m-%d").date()
@@ -70,10 +94,21 @@ def validate_dates(from_date: str, to_date: str, current_date: date) -> tuple:
 
     return from_date, to_date
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+async def make_api_request(session, url):
+    timeout = aiohttp.ClientTimeout(total=30)  # Increase timeout to 30 seconds
+    async with session.get(url, timeout=timeout) as response:
+        if response.status != 200:
+            data = await response.json()
+            logging.error(f"API request failed with status code {response.status}")
+            logging.error(f"Response content: {data}")
+            raise HTTPException(status_code=response.status, detail=f"API request failed: {data.get('error', 'Unknown error')}")
+        return await response.json()
+
 async def fetch_daily_data(session, url, current_date, include_extended_hours):
-    async with session.get(url) as response:
-        data = await response.json()
-        if response.status == 200 and data.get('status') == 'OK':
+    try:
+        data = await make_api_request(session, url)
+        if data.get('status') == 'OK':
             result = {
                 't': int(datetime.strptime(data['from'], "%Y-%m-%d").timestamp() * 1000),
                 'o': data['open'],
@@ -87,21 +122,21 @@ async def fetch_daily_data(session, url, current_date, include_extended_hours):
                 result['afterHours'] = data.get('afterHours')
             logging.info(f"Received data for {current_date}")
             return result
-        elif response.status != 404:
-            logging.error(f"API request failed with status code {response.status}")
-            logging.error(f"Response content: {data}")
         else:
             logging.info(f"No data available for {current_date} (likely a weekend or holiday)")
         return None
+    except Exception as e:
+        logging.error(f"Error fetching daily data for {current_date}: {str(e)}")
+        return None
 
 async def fetch_current_day_data(session, url, current_date, include_extended_hours):
-    async with session.get(url) as response:
-        data = await response.json()
-        if response.status == 200 and data.get('results'):
+    try:
+        data = await make_api_request(session, url)
+        if data.get('results'):
             minute_data = data['results']
             ny_tz = pytz.timezone('America/New_York')
-            market_open = time(9, 30)
-            market_close = time(16, 0)
+            market_open = dt_time(9, 30)
+            market_close = dt_time(16, 0)
 
             if include_extended_hours:
                 filtered_data = minute_data
@@ -123,6 +158,9 @@ async def fetch_current_day_data(session, url, current_date, include_extended_ho
                 logging.info(f"No data available within specified hours for {current_date}")
         else:
             logging.error(f"Failed to fetch current day data: {data}")
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching current day data for {current_date}: {str(e)}")
         return None
 
 async def get_stock_data(ticker, multiplier, timespan, from_date, to_date, include_extended_hours):
@@ -150,14 +188,15 @@ async def get_stock_data(ticker, multiplier, timespan, from_date, to_date, inclu
         else:
             base_url = "https://api.polygon.io/v2/aggs/ticker"
             url = f"{base_url}/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}?adjusted=true&sort=asc&limit=50000&apiKey={api_key}"
-            async with session.get(url) as response:
-                if response.status != 200:
-                    data = await response.json()
-                    logging.error(f"API request failed with status code {response.status}")
-                    logging.error(f"Response content: {data}")
-                    raise HTTPException(status_code=response.status, detail=f"API request failed: {data.get('error', 'Unknown error')}")
-                data = await response.json()
+        try:
+                data = await make_api_request(session, url)
                 all_results = data.get('results', [])
+        except HTTPException as e:
+                logging.error(f"HTTP Exception: {str(e)}")
+                raise
+        except Exception as e:
+                logging.error(f"Unexpected error in API request: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
     logging.info(f"Total data points fetched: {len(all_results)}")
 
@@ -168,8 +207,8 @@ async def get_stock_data(ticker, multiplier, timespan, from_date, to_date, inclu
     return all_results
 
 def is_market_hours(dt):
-    market_open = time(9, 30)
-    market_close = time(16, 0)
+    market_open = dt_time(9, 30)
+    market_close = dt_time(16, 0)
     return market_open <= dt.time() <= market_close and dt.weekday() < 5
 
 def process_data(data, include_extended_hours, timespan):
@@ -216,15 +255,15 @@ def is_market_open():
     ny_tz = pytz.timezone('America/New_York')
     current_time = datetime.now(ny_tz).time()
     current_day = datetime.now(ny_tz).weekday()
-    market_open = time(9, 30)
-    market_close = time(16, 0)
+    market_open = dt_time(9, 30)
+    market_close = dt_time(16, 0)
     return market_open <= current_time <= market_close and current_day < 5
 
 async def analyze_stock(stock_request: StockRequest):
     logging.info(f"Analyzing stock: {stock_request.ticker}")
 
     # Get current date and time in New York
-    ny_tz = pytz.timezone('America/New_York')
+    ny_tz = pytz.timezone('America/New York')
     current_datetime = datetime.now(ny_tz)
     current_date = current_datetime.date()
 
@@ -246,10 +285,10 @@ async def analyze_stock(stock_request: StockRequest):
         processed_data = process_data(data, include_extended_hours, timespan)
     except HTTPException as e:
         logging.error(f"HTTPException in get_stock_data: {str(e.detail)}")
-        raise Exception(str(e.detail)) from e
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     except Exception as e:
         logging.error(f"Unexpected error in get_stock_data: {str(e)}")
-        raise Exception(f"An unexpected error occurred: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
     if not processed_data:
         error_message = f"No {'market hours' if not include_extended_hours else ''} data available for {ticker} from {from_date} to {to_date}. "
@@ -383,7 +422,7 @@ Please format your response using Markdown syntax, including appropriate headers
     try:
         logging.info(f"Sending request to OpenAI for {ticker} analysis")
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a financial analyst expert in stock market analysis."},
                 {"role": "user", "content": prompt}
