@@ -42,3 +42,4 @@ uuid
 plotly
 kaleido
 aiohttp
+tenacity 
