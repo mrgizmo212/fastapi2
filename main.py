@@ -2,9 +2,10 @@ import asyncio
 from fastapi import FastAPI, HTTPException
 from typing import List, Dict, Tuple
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timedelta
 import statistics
 import argparse
+import time
 
 app = FastAPI()
 
@@ -214,7 +215,16 @@ def evaluate_ttgt_setup(ticker: str, data: List[Dict]) -> Tuple[int, Dict]:
 
     return score, details
 
-def main():
+async def keep_connection_alive(duration: int = 300):
+    """
+    Keep the connection alive for the specified duration (in seconds).
+    """
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        print("Keeping connection alive...")
+        await asyncio.sleep(10)  # Sleep for 10 seconds between each check
+
+async def main_async():
     parser = argparse.ArgumentParser(description='TTG Triangle Intraday Analysis')
     parser.add_argument('tickers', nargs='*', help='Ticker symbols (individual or comma-separated)')
     args = parser.parse_args()
@@ -228,7 +238,7 @@ def main():
         tickers = [ticker.upper() for ticker in tickers]  # Ensure uppercase
         
         # Run analysis on provided tickers
-        results = asyncio.run(analyze_tickers(tickers))
+        results = await analyze_tickers(tickers)
         
         # Print results
         for ticker, result in results.items():
@@ -242,8 +252,14 @@ def main():
                 print(f"Error: {result['error']}")
     else:
         # Fetch and analyze tickers from the provided endpoint
-        results = asyncio.run(fetch_and_analyze_tickers())
+        results = await fetch_and_analyze_tickers()
         print(results)
+    
+    # Keep the connection alive for 3-5 minutes (300 seconds)
+    await keep_connection_alive(300)
+
+def main():
+    asyncio.run(main_async())
 
 if __name__ == '__main__':
     import sys
