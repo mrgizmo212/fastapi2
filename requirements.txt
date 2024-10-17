@@ -30,3 +30,7 @@ urllib3
 websocket-client
 zope.interface
 lightweight-charts
+aiohttp
+asyncio
+statistics
+argparse
