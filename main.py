@@ -1,101 +1,43 @@
 import asyncio
-from fastapi import FastAPI, HTTPException
-from typing import List, Dict, Tuple
-import aiohttp
-from datetime import datetime, timedelta
 import statistics
-import argparse
-import time
+from datetime import datetime
+from typing import List, Dict, Tuple
 
-app = FastAPI()
+import aiohttp
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
+# Constants
 API_KEY = 'kQWDqA0jsVPfH5vj5dnSiHH5j7HPFw6w'  # Replace with your Polygon.io API key
 BASE_URL = 'https://api.polygon.io'
-
 AUTH_TOKEN = 'Y0buhusiLO2AXc2yCWTlLeCNh9XnfW4stQ72tLpQ3QZK'
 TICKERS_URL = 'https://ttg-triangle.sliplane.app/mid-to-mega-ttg-triangle'
 
+# Initialize FastAPI app
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+
+# Helper Functions
 async def get_tickers(session: aiohttp.ClientSession, url: str, auth_token: str) -> Dict:
     headers = {'Authorization': f'Bearer {auth_token}'}
     async with session.get(url, headers=headers) as response:
         if response.status != 200:
             text = await response.text()
-            raise Exception(f"Failed to get tickers from {url}: {text}")
+            raise HTTPException(status_code=response.status, detail=f"Failed to get tickers: {text}")
         data = await response.json()
     return data
 
-async def fetch_and_analyze_tickers():
-    """
-    Fetch tickers and automatically analyze them using the TTG Triangle setup.
-    """
-    try:
-        async with aiohttp.ClientSession() as session:
-            data = await get_tickers(session, TICKERS_URL, AUTH_TOKEN)
-        
-        if not isinstance(data, dict) or 'rows' not in data:
-            raise ValueError(f"Unexpected data format: {data}")
-        
-        # Extract tickers from the 'rows' data
-        tickers = [row[1] for row in data['rows'] if len(row) > 1]
-        
-        # Analyze the tickers
-        analysis_results = await analyze_tickers(tickers)
-        
-        # Sort results by score
-        sorted_results = dict(sorted(analysis_results.items(), key=lambda item: item[1].get('score', 0), reverse=True))
-        
-        # Combine the original data with the analysis results
-        for row in data['rows']:
-            ticker = row[1] if len(row) > 1 else None
-            if ticker in sorted_results:
-                row.append(sorted_results[ticker])
-        
-        # Add a new header for the analysis results
-        data['headers'].append("TTG Triangle Analysis")
-        
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching and analyzing tickers: {str(e)}")
-
-@app.get("/fetch_and_analyze_tickers")
-async def fetch_and_analyze_tickers_endpoint():
-    """
-    Fetch tickers, analyze them, and return the combined results.
-    """
-    return await fetch_and_analyze_tickers()
-
-async def analyze_tickers(tickers: List[str]) -> Dict[str, Dict]:
-    results = {}
-    tickers = [ticker.upper() for ticker in tickers]  # Ensure tickers are uppercase
-    async with aiohttp.ClientSession() as session:
-        tasks = [evaluate_ticker(session, ticker) for ticker in tickers]
-        ticker_results = await asyncio.gather(*tasks)
-    for ticker, result in zip(tickers, ticker_results):
-        results[ticker] = result
-    return results
-
-async def evaluate_ticker(session: aiohttp.ClientSession, ticker: str) -> Dict:
-    """
-    Evaluate TTG Triangle setup for a single ticker intraday.
-    """
-    try:
-        print(f"Analyzing {ticker}...")
-        data = await get_intraday_data(session, ticker)
-        score, details = evaluate_ttgt_setup(ticker, data)
-        return {'score': score, 'details': details}
-    except Exception as e:
-        print(f"Error analyzing {ticker}: {e}")
-        return {'error': str(e)}
-
 async def get_intraday_data(session: aiohttp.ClientSession, ticker: str) -> List[Dict]:
-    """
-    Retrieve intraday price and volume data for the given ticker.
-    """
     date = datetime.now().strftime('%Y-%m-%d')
-    multiplier = 3  # 3-minute bars
-    timespan = 'minute'
-
-    url = f"{BASE_URL}/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{date}/{date}"
+    url = f"{BASE_URL}/v2/aggs/ticker/{ticker}/range/3/minute/{date}/{date}"
     params = {
         'adjusted': 'true',
         'sort': 'asc',
@@ -105,22 +47,15 @@ async def get_intraday_data(session: aiohttp.ClientSession, ticker: str) -> List
     async with session.get(url, params=params) as response:
         if response.status != 200:
             text = await response.text()
-            raise HTTPException(status_code=500, detail=f"Error fetching data for {ticker}: {text}")
+            raise HTTPException(status_code=response.status, detail=f"Error fetching data for {ticker}: {text}")
         data = await response.json()
     if data.get('resultsCount', 0) == 0:
         raise HTTPException(status_code=404, detail=f"No data found for {ticker}")
     return data['results']
 
 def evaluate_ttgt_setup(ticker: str, data: List[Dict]) -> Tuple[int, Dict]:
-    """
-    Evaluate the TTG Triangle setup intraday for the given data.
-    Return a score and details based on how well it meets the criteria.
-    """
-    score = 0
-    details = {}
     if not data or len(data) < 20:
-        details['error'] = 'Not enough data to analyze'
-        return score, details
+        return 0, {'error': 'Not enough data to analyze'}
 
     closing_prices = [bar['c'] for bar in data]
     high_prices = [bar['h'] for bar in data]
@@ -128,147 +63,109 @@ def evaluate_ttgt_setup(ticker: str, data: List[Dict]) -> Tuple[int, Dict]:
     volumes = [bar['v'] for bar in data]
     timestamps = [datetime.fromtimestamp(bar['t'] / 1000) for bar in data]
 
-    # 1. Identify previous highs before breakout
-    # Use the first half of the day to find previous highs
     mid_index = len(high_prices) // 2
     previous_high = max(high_prices[:mid_index])
-    details['previous_high'] = previous_high
+    score = 0
+    details = {'previous_high': previous_high}
 
-    # 2. Detect breakout above previous high with increased volume
-    breakout = False
-    breakout_index = None
-    average_volume = statistics.mean(volumes[:mid_index]) if mid_index > 0 else volumes[0]
-    for i in range(mid_index, len(high_prices)):
-        if high_prices[i] > previous_high and volumes[i] > average_volume * 1.5:
-            breakout = True
-            breakout_index = i
-            breakout_price = high_prices[i]
-            breakout_volume = volumes[i]
-            details['breakout_time'] = timestamps[i].strftime('%H:%M')
-            details['breakout_price'] = breakout_price
-            details['breakout_volume'] = breakout_volume
-            score += 5
-            break
-    if not breakout:
+    # Detect breakout
+    breakout_index = next((i for i in range(mid_index, len(high_prices))
+                           if high_prices[i] > previous_high and volumes[i] > statistics.mean(volumes[:mid_index]) * 1.5), None)
+    if breakout_index is None:
         details['breakout'] = False
-        return score, details  # Cannot proceed without a breakout
-    details['breakout'] = True
+        return score, details
 
-    # 3. Check for pullback toward previous high on decreasing volume
-    pullback = False
+    details.update({
+        'breakout': True,
+        'breakout_time': timestamps[breakout_index].strftime('%H:%M'),
+        'breakout_price': high_prices[breakout_index],
+        'breakout_volume': volumes[breakout_index]
+    })
+    score += 5
+
+    # Check for pullback
     pullback_start = breakout_index + 1
-    pullback_volumes = []
-    pullback_highs = []
-    pullback_lows = []
-
-    for i in range(pullback_start, len(high_prices)):
-        if low_prices[i] <= previous_high:
-            pullback = True
-            pullback_volumes.append(volumes[i])
-            pullback_highs.append(high_prices[i])
-            pullback_lows.append(low_prices[i])
-        else:
-            break  # Pullback ended
-    if pullback:
+    pullback_data = [(high_prices[i], low_prices[i], volumes[i]) 
+                     for i in range(pullback_start, len(high_prices)) 
+                     if low_prices[i] <= previous_high]
+    
+    if pullback_data:
         details['pullback'] = True
-        # Check if volumes are decreasing during pullback
-        if pullback_volumes == sorted(pullback_volumes, reverse=True):
-            score += 5
-            details['pullback_volume'] = 'Decreasing'
-        else:
-            details['pullback_volume'] = 'Not Decreasing'
+        pullback_volumes = [v for _, _, v in pullback_data]
+        details['pullback_volume'] = 'Decreasing' if pullback_volumes == sorted(pullback_volumes, reverse=True) else 'Not Decreasing'
+        score += 5 if details['pullback_volume'] == 'Decreasing' else 0
 
-        # 4. Check for descending triangle formation
-        lower_highs = all(pullback_highs[i] < pullback_highs[i - 1] for i in range(1, len(pullback_highs)))
-        if pullback_lows:
-            horizontal_support = max(pullback_lows) - min(pullback_lows) < 0.005 * previous_high  # Adjust threshold as needed
-        else:
-            horizontal_support = False
-        if lower_highs and horizontal_support:
-            score += 5
+        # Check for descending triangle
+        pullback_highs = [h for h, _, _ in pullback_data]
+        pullback_lows = [l for _, l, _ in pullback_data]
+        if all(pullback_highs[i] < pullback_highs[i-1] for i in range(1, len(pullback_highs))) and \
+           max(pullback_lows) - min(pullback_lows) < 0.005 * previous_high:
             details['descending_triangle'] = True
+            score += 5
         else:
             details['descending_triangle'] = False
+
+        # Verify support levels
+        if min(pullback_lows) >= previous_high:
+            details['support_level_holding'] = True
+            score += 5
+        else:
+            details['support_level_holding'] = False
+
+        # Volume analysis
+        if max(pullback_volumes) < volumes[breakout_index]:
+            details['volume_analysis'] = 'Pullback volume less than breakout volume'
+            score += 5
+        else:
+            details['volume_analysis'] = 'Pullback volume not less than breakout volume'
     else:
         details['pullback'] = False
 
-    # 5. Verify support levels
-    if pullback and pullback_lows:
-        support_level = min(pullback_lows)
-        if support_level >= previous_high:
-            score += 5
-            details['support_level_holding'] = True
-        else:
-            details['support_level_holding'] = False
-    else:
-        details['support_level_holding'] = False
-
-    # 6. Volume analysis
-    # Confirm decreasing volume in pullback compared to breakout volume
-    if pullback and pullback_volumes and max(pullback_volumes) < breakout_volume:
-        score += 5
-        details['volume_analysis'] = 'Pullback volume less than breakout volume'
-    else:
-        details['volume_analysis'] = 'Pullback volume not less than breakout volume'
-
     details['final_score'] = score
-
     return score, details
 
-async def keep_connection_alive(duration: int = 300):
-    """
-    Keep the connection alive for the specified duration (in seconds).
-    """
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        print("Keeping connection alive...")
-        await asyncio.sleep(10)  # Sleep for 10 seconds between each check
+# Main analysis functions
+async def analyze_tickers(tickers: List[str]) -> Dict[str, Dict]:
+    async with aiohttp.ClientSession() as session:
+        tasks = [evaluate_ticker(session, ticker.upper()) for ticker in tickers]
+        results = await asyncio.gather(*tasks)
+    return dict(zip(tickers, results))
 
-async def main_async():
-    parser = argparse.ArgumentParser(description='TTG Triangle Intraday Analysis')
-    parser.add_argument('tickers', nargs='*', help='Ticker symbols (individual or comma-separated)')
-    args = parser.parse_args()
+async def evaluate_ticker(session: aiohttp.ClientSession, ticker: str) -> Dict:
+    try:
+        data = await get_intraday_data(session, ticker)
+        score, details = evaluate_ttgt_setup(ticker, data)
+        return {'score': score, 'details': details}
+    except Exception as e:
+        return {'error': str(e)}
 
-    if args.tickers:
-        # Process tickers input
-        tickers_input = args.tickers
-        tickers = []
-        for item in tickers_input:
-            tickers.extend(item.replace(',', ' ').split())
-        tickers = [ticker.upper() for ticker in tickers]  # Ensure uppercase
+# API Endpoints
+@app.get("/fetch_and_analyze_tickers")
+async def fetch_and_analyze_tickers_endpoint():
+    try:
+        async with aiohttp.ClientSession() as session:
+            data = await get_tickers(session, TICKERS_URL, AUTH_TOKEN)
         
-        # Run analysis on provided tickers
-        results = await analyze_tickers(tickers)
+        if not isinstance(data, dict) or 'rows' not in data:
+            raise ValueError(f"Unexpected data format: {data}")
         
-        # Print results
-        for ticker, result in results.items():
-            print(f"\nTicker: {ticker}")
-            if 'score' in result:
-                print(f"Score: {result['score']}")
-                print("Details:")
-                for key, value in result['details'].items():
-                    print(f"  {key}: {value}")
-            else:
-                print(f"Error: {result['error']}")
-    else:
-        # Fetch and analyze tickers from the provided endpoint
-        results = await fetch_and_analyze_tickers()
-        print(results)
-    
-    # Keep the connection alive for 3-5 minutes (300 seconds)
-    await keep_connection_alive(300)
+        tickers = [row[1] for row in data['rows'] if len(row) > 1]
+        analysis_results = await analyze_tickers(tickers)
+        
+        sorted_results = dict(sorted(analysis_results.items(), key=lambda item: item[1].get('score', 0), reverse=True))
+        
+        for row in data['rows']:
+            ticker = row[1] if len(row) > 1 else None
+            if ticker in sorted_results:
+                row.append(sorted_results[ticker])
+        
+        data['headers'].append("TTG Triangle Analysis")
+        
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching and analyzing tickers: {str(e)}")
 
-def main():
-    asyncio.run(main_async())
-
+# Run the application
 if __name__ == '__main__':
-    import sys
-    if 'uvicorn' in sys.modules:
-        # Running with uvicorn
-        pass
-    elif len(sys.argv) > 1:
-        main()
-    else:
-        # Start FastAPI app if no arguments are provided
-        import uvicorn
-        uvicorn.run("ttg_triangle_analysis:app", host='0.0.0.0', port=8000, reload=True)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
