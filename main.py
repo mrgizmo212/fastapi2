@@ -64,6 +64,36 @@ class EconomicEvent(BaseModel):
 
 class EconomicsResponse(BaseModel):
     economics: List[EconomicEvent]
+    
+class EarningsData(BaseModel):
+    id: str
+    date: str
+    date_confirmed: str
+    time: str
+    ticker: str
+    exchange: str
+    name: str
+    currency: str
+    period: str
+    period_year: int
+    eps_type: Optional[str]
+    eps: Optional[str]
+    eps_est: Optional[str]
+    eps_prior: Optional[str]
+    eps_surprise: Optional[str]
+    eps_surprise_percent: Optional[str]
+    revenue_type: Optional[str]
+    revenue: Optional[str]
+    revenue_est: Optional[str]
+    revenue_prior: Optional[str]
+    revenue_surprise: Optional[str]
+    revenue_surprise_percent: Optional[str]
+    importance: int
+    notes: Optional[str]
+    updated: int
+
+class EarningsResponse(BaseModel):
+    earnings: List[EarningsData]    
 
 def parse_xml(xml_string: str) -> Dict[str, Any]:
     root = ET.fromstring(xml_string)
@@ -193,6 +223,35 @@ async def get_economics(
         raise e
     except Exception as e:
         logger.error(f"Unexpected error in get_economics: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
+    
+@app.get("/calendar/earnings", response_model=EarningsResponse)
+async def get_earnings(
+    page: int = Query(0, description="Page offset"),
+    pagesize: int = Query(1000, ge=10, le=1000, description="Number of results returned (min 10, max 1000)"),
+    date_from: Optional[str] = Query(None, description="Date to query from point in time (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Date to query to point in time (YYYY-MM-DD)"),
+    importance: Optional[int] = Query(None, ge=0, le=5, description="The importance level to filter by"),
+    tickers: Optional[str] = Query(None, description="Comma-separated list of tickers to filter by")
+):
+    url = "https://api.benzinga.com/api/v1/calendar/earnings"
+    
+    params = {
+        "page": page,
+        "pagesize": pagesize,
+        "parameters[date_from]": date_from,
+        "parameters[date_to]": date_to,
+        "parameters[importance]": importance,
+        "parameters[tickers]": tickers.upper() if tickers else None
+    }
+    
+    try:
+        result = await fetch_data(url, params)
+        return result
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Unexpected error in get_earnings: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
 if __name__ == "__main__":
