@@ -18,6 +18,7 @@ load_dotenv()
 
 app = FastAPI()
 
+# Existing models
 class TickerInput(BaseModel):
     symbol: str
 
@@ -64,7 +65,8 @@ class EconomicEvent(BaseModel):
 
 class EconomicsResponse(BaseModel):
     economics: List[EconomicEvent]
-    
+
+# New model for Earnings
 class EarningsData(BaseModel):
     id: str
     date: str
@@ -93,8 +95,9 @@ class EarningsData(BaseModel):
     updated: int
 
 class EarningsResponse(BaseModel):
-    earnings: List[EarningsData]    
+    earnings: List[EarningsData]
 
+# Utility functions
 def parse_xml(xml_string: str) -> Dict[str, Any]:
     root = ET.fromstring(xml_string)
     result = {}
@@ -136,6 +139,12 @@ async def fetch_data(url: str, params: dict, token_env: str = "API_TOKEN") -> Di
         logger.error(f"API request failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch data from external API: {str(e)}")
 
+def sort_economics_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort economic events by date, closest to current date first."""
+    now = datetime.now(pytz.UTC)
+    return sorted(events, key=lambda x: abs(datetime.strptime(x['date'], '%Y-%m-%d').replace(tzinfo=pytz.UTC) - now))
+
+# Existing endpoints
 @app.post("/bulls_bears/")
 async def get_bulls_bears(ticker: TickerInput):
     url = os.getenv("API_URL")
@@ -175,11 +184,6 @@ async def get_analyst_insights(
         logger.error(f"Unexpected error in get_analyst_insights: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
-def sort_economics_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort economic events by date, closest to current date first."""
-    now = datetime.now(pytz.UTC)
-    return sorted(events, key=lambda x: abs(datetime.strptime(x['date'], '%Y-%m-%d').replace(tzinfo=pytz.UTC) - now))
-
 @app.get("/economics")
 async def get_economics(
     page: int = Query(0, description="Page offset"),
@@ -193,14 +197,12 @@ async def get_economics(
 ):
     url = "https://api.benzinga.com/api/v2.1/calendar/economics"
     
-    # Establish current date and time in UTC
     utc_now = datetime.now(pytz.UTC)
     
     if date_from is None:
         date_from = utc_now.strftime('%Y-%m-%d')
     
     if date_to is None:
-        # Set date_to to 90 days from today if not provided
         date_to = (utc_now + timedelta(days=90)).strftime('%Y-%m-%d')
 
     params = {
@@ -224,26 +226,36 @@ async def get_economics(
     except Exception as e:
         logger.error(f"Unexpected error in get_economics: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
-    
+
+# New Earnings endpoint
 @app.get("/calendar/earnings", response_model=EarningsResponse)
 async def get_earnings(
     page: int = Query(0, description="Page offset"),
     pagesize: int = Query(1000, ge=10, le=1000, description="Number of results returned (min 10, max 1000)"),
-    date_from: Optional[str] = Query(None, description="Date to query from point in time (YYYY-MM-DD)"),
-    date_to: Optional[str] = Query(None, description="Date to query to point in time (YYYY-MM-DD)"),
+    date: Optional[str] = Query(None, description="Date to query for calendar data"),
+    date_from: Optional[str] = Query(None, description="Date to query from point in time"),
+    date_to: Optional[str] = Query(None, description="Date to query to point in time"),
+    date_sort: str = Query("date", description="Field sort option for earnings calendar"),
+    tickers: Optional[str] = Query(None, description="Comma-separated list of tickers to filter by"),
     importance: Optional[int] = Query(None, ge=0, le=5, description="The importance level to filter by"),
-    tickers: Optional[str] = Query(None, description="Comma-separated list of tickers to filter by")
+    updated: Optional[int] = Query(None, description="Records last Updated Unix timestamp (UTC)")
 ):
     url = "https://api.benzinga.com/api/v1/calendar/earnings"
     
     params = {
         "page": page,
         "pagesize": pagesize,
+        "parameters[date]": date,
         "parameters[date_from]": date_from,
         "parameters[date_to]": date_to,
+        "parameters[date_sort]": date_sort,
+        "parameters[tickers]": tickers.upper() if tickers else None,
         "parameters[importance]": importance,
-        "parameters[tickers]": tickers.upper() if tickers else None
+        "parameters[updated]": updated
     }
+    
+    # Remove None values from params
+    params = {k: v for k, v in params.items() if v is not None}
     
     try:
         result = await fetch_data(url, params)
