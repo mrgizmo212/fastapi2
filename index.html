@@ -74,20 +74,36 @@
         let currentDate = new Date();
         let currentPage = 1;
         const itemsPerPage = 20;
+        const API_KEY = 'f753af5e0fa54c6c93c7643b683de29b';
+        const API_BASE_URL = 'http://localhost:8000';
 
         async function fetchEarningsData() {
             try {
-                const response = await fetch('http://localhost:8000/earnings/next90days');
+                const response = await fetch(`${API_BASE_URL}/earnings/next90days`, {
+                    headers: {
+                        'Authorization': `Bearer ${API_KEY}`
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 allEarnings = data.earnings;
                 filterAndDisplayEarnings();
                 updateCurrentMonth();
             } catch (error) {
                 console.error('Error fetching earnings data:', error);
+                displayErrorMessage('Failed to load earnings data. Please try again later.');
             }
         }
 
+        function displayErrorMessage(message) {
+            const tableBody = document.getElementById('earningsTableBody');
+            tableBody.innerHTML = `<tr><td colspan="8" class="px-4 py-3 text-center text-red-500">${message}</td></tr>`;
+        }
+
         function formatTime(time) {
+            if (!time) return 'N/A';
             const [hours, minutes] = time.split(':');
             const hour = parseInt(hours, 10);
             const ampm = hour >= 12 ? 'PM' : 'AM';
@@ -97,7 +113,7 @@
 
         function formatCurrency(value, currency) {
             if (value === null || value === undefined) return 'N/A';
-            return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency, maximumFractionDigits: 0 }).format(value);
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 0 }).format(value);
         }
 
         function formatNumber(value) {
@@ -114,15 +130,21 @@
 
         function filterEarningsBySearch(earnings, searchTerm) {
             if (!searchTerm) return earnings;
+            searchTerm = searchTerm.toLowerCase();
             return earnings.filter(earning => 
-                earning.ticker.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                earning.name.toLowerCase().includes(searchTerm.toLowerCase())
+                (earning.ticker && earning.ticker.toLowerCase().includes(searchTerm)) ||
+                (earning.name && earning.name.toLowerCase().includes(searchTerm))
             );
         }
 
         function displayEarnings(earnings) {
             const tableBody = document.getElementById('earningsTableBody');
             tableBody.innerHTML = '';
+
+            if (earnings.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="px-4 py-3 text-center">No earnings data available for this period.</td></tr>';
+                return;
+            }
 
             const startIndex = (currentPage - 1) * itemsPerPage;
             const endIndex = startIndex + itemsPerPage;
@@ -132,10 +154,10 @@
                 const row = document.createElement('tr');
                 row.className = 'border-b';
                 row.innerHTML = `
-                    <td class="px-4 py-3">${earning.date}</td>
+                    <td class="px-4 py-3">${earning.date || 'N/A'}</td>
                     <td class="px-4 py-3">${formatTime(earning.time)}</td>
-                    <td class="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">${earning.ticker}</td>
-                    <td class="px-4 py-3">${earning.name}</td>
+                    <td class="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">${earning.ticker || 'N/A'}</td>
+                    <td class="px-4 py-3">${earning.name || 'N/A'}</td>
                     <td class="px-4 py-3">${formatNumber(earning.eps_est)}</td>
                     <td class="px-4 py-3">${formatNumber(earning.eps)}</td>
                     <td class="px-4 py-3">${formatCurrency(earning.revenue_est, earning.currency)}</td>
@@ -166,7 +188,21 @@
             paginationControls.appendChild(prevButton);
 
             // Page numbers
-            for (let i = 1; i <= totalPages; i++) {
+            const maxPageButtons = 5;
+            const startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
+            const endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
+
+            if (startPage > 1) {
+                paginationControls.appendChild(createPaginationButton('1', true, () => {
+                    currentPage = 1;
+                    filterAndDisplayEarnings();
+                }));
+                if (startPage > 2) {
+                    paginationControls.appendChild(createPaginationButton('...', false));
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
                 const pageButton = createPaginationButton(i.toString(), true, () => {
                     currentPage = i;
                     filterAndDisplayEarnings();
@@ -175,6 +211,16 @@
                     pageButton.classList.add('bg-blue-50', 'text-blue-600');
                 }
                 paginationControls.appendChild(pageButton);
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    paginationControls.appendChild(createPaginationButton('...', false));
+                }
+                paginationControls.appendChild(createPaginationButton(totalPages.toString(), true, () => {
+                    currentPage = totalPages;
+                    filterAndDisplayEarnings();
+                }));
             }
 
             // Next button
