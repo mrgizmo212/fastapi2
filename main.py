@@ -3,7 +3,8 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -31,6 +32,17 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+# Security
+security = HTTPBearer()
+API_KEY = os.getenv("API_KEY")
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="API Key not configured")
+    if credentials.credentials != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return credentials.credentials
 
 # Pydantic models
 class EarningsItem(BaseModel):
@@ -157,7 +169,8 @@ async def get_next_90_days_earnings(
     date_from: Optional[str] = Query(None, description="Start date for earnings query (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="End date for earnings query (YYYY-MM-DD)"),
     tickers: Optional[str] = Query(None, description="Comma-separated list of tickers to filter by"),
-    importance: int = Query(4, ge=0, le=5, description="The importance level to filter by (default: 4)")
+    importance: int = Query(4, ge=0, le=5, description="The importance level to filter by (default: 4)"),
+    api_key: str = Depends(verify_api_key)
 ):
     try:
         ny_time = get_ny_time()
@@ -196,7 +209,8 @@ async def get_earnings(
     date_to: Optional[str] = Query(None, description="Date to query to point in time (YYYY-MM-DD)"),
     importance: int = Query(4, ge=0, le=5, description="The importance level to filter by (default: 4)"),
     tickers: Optional[str] = Query(None, description="Comma-separated list of tickers to filter by"),
-    response_format: str = Query("json", description="Response format: 'xml' or 'json'")
+    response_format: str = Query("json", description="Response format: 'xml' or 'json'"),
+    api_key: str = Depends(verify_api_key)
 ):
     params = {
         "page": page,
