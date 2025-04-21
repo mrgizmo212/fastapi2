@@ -240,7 +240,7 @@ async def get_earnings(
     importance: Optional[int] = Query(None, ge=0, le=5, description="The importance level to filter by"),
     updated: Optional[int] = Query(None, description="Records last Updated Unix timestamp (UTC)")
 ):
-    url = "https://api.benzinga.com/api/v1/calendar/earnings"
+    url = "https://api.benzinga.com/api/v2/calendar/earnings"
     
     params = {
         "page": page,
