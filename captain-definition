@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 2,
+  "templateId": "python/3.9",
+  "buildCommand": "pip install -r requirements.txt"
+}
