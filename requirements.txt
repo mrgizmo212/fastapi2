@@ -1,32 +1,20 @@
--e .[all]
--r requirements-tests.txt
--r requirements-docs.txt
-pre-commit >=2.17.0,<4.0.0
-# For generating screenshots
-playwright
-
-annotated-types
-anyio
-certifi
-charset-normalizer
-colorama
-DateTime
-distro
+# Core dependencies
+fastapi
+uvicorn
+pydantic
+httpx
+requests
 h11
 httpcore
-httpx
 idna
 openai
-pydantic
-pydantic_core
-python-dotenv
-pytz
-requests
 sniffio
-timedelta
-tqdm
-typing_extensions
 urllib3
 websocket-client
 zope.interface
-lightweight-charts
+tqdm
+python-dotenv
+
+# Remove these include lines
+# -r requirements-tests.txt
+# -r requirements-docs.txt
